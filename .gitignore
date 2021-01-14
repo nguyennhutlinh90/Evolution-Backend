@@ -1,0 +1,5 @@
+/Evolution-Backend/bin/
+/Evolution-Backend/obj/
+/.vs/
+*.user
+*.pubxml

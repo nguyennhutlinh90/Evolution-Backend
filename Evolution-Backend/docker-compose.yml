@@ -1,0 +1,17 @@
+version: '3.1'
+
+services:
+
+  evolution-api:
+    image: evolution-api
+    container_name: evolution-api
+    restart: always
+    build: .
+    ports:
+      - "8383:80"
+    networks:
+      - nw-evolution-api
+      
+networks:
+  nw-evolution-api:
+    name: nw-evolution-api
