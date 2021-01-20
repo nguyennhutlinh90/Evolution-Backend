@@ -1066,7 +1066,8 @@ namespace Evolution_Backend.Controllers
                                 {
                                     { "box_number", "$item_details.box_number" },
                                     { "box_dimension", "$item_details.box_dimension" },
-                                    { "box_weight", "$item_details.box_weight" }
+                                    { "box_weight", "$item_details.box_weight" },
+                                    { "box_status", "$item_details.box_status" }
                                 }
                             },
                             { "extras",
@@ -1091,6 +1092,7 @@ namespace Evolution_Backend.Controllers
                             { "box_number", "$_id.box_number" },
                             { "box_dimension", "$_id.box_dimension" },
                             { "box_weight", "$_id.box_weight" },
+                            { "box_status", "$_id.box_status" },
                             { "total_expected_qty", new BsonDocument("$sum", "$extras.expected_qty") },
                             { "total_packed_qty", new BsonDocument("$sum", "$extras.packed_qty") },
                             { "extras", "$extras" }
