@@ -44,6 +44,8 @@ namespace Evolution_Backend.Models
 
         public string CustomerCode { get; set; }
 
+        public string StatusCode { get; set; }
+
         public bool ProcessManual { get; set; }
 
         public bool UseProduceQty { get; set; }

@@ -29,6 +29,14 @@ namespace Evolution_Backend.DbModels
             }
         }
 
+        public IMongoCollection<Num_Gen_Collection> num_gen
+        {
+            get
+            {
+                return _database.GetCollection<Num_Gen_Collection>("num_gen");
+            }
+        }
+
         public IMongoCollection<Action_Collection> action
         {
             get

@@ -57,6 +57,7 @@ namespace Evolution_Backend
             });
 
             // Register API services
+            services.AddScoped<INumGenService, NumGenService>();
             services.AddScoped<IActionService, ActionService>();
             services.AddScoped<ICustomerService, CustomerService>();
             services.AddScoped<IItemService, ItemService>();

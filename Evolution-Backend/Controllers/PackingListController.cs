@@ -19,13 +19,15 @@ namespace Evolution_Backend.Controllers
     [Route("api/packinglist")]
     public class PackingListController : ApiControllerBase
     {
+        private readonly INumGenService _numGenService;
         private readonly IActionService _actionService;
         private readonly ICustomerService _customerService;
         private readonly IUserService _userService;
         private readonly IPOService _POService;
         private readonly IPLService _PLService;
-        public PackingListController(IActionService actionService, ICustomerService customerService, IUserService userService, IPOService POService, IPLService PLService)
+        public PackingListController(INumGenService numGenService, IActionService actionService, ICustomerService customerService, IUserService userService, IPOService POService, IPLService PLService)
         {
+            _numGenService = numGenService;
             _actionService = actionService;
             _customerService = customerService;
             _userService = userService;
@@ -33,7 +35,6 @@ namespace Evolution_Backend.Controllers
             _PLService = PLService;
         }
 
-        //[ApiExplorerSettings(IgnoreApi = true)]
         [HttpPost]
         [Route("upload")]
         public async Task<ActionResult> Upload([FromBody] List<PL_Request> request)
@@ -48,6 +49,10 @@ namespace Evolution_Backend.Controllers
 
                 if (request.Any(pl => string.IsNullOrEmpty(pl.PONumber)))
                     return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("PO number(s)"));
+
+                //var srGetNumGenBox = await _numGenService.Get(Constants.NumGenType.Box);
+                //if (!string.IsNullOrEmpty(srGetNumGenBox.ErrorMessage))
+                //    return new ApiResponse((int)ApiError.DbError, string.Format("Get box number generator error: {0}", srGetNumGenBox.ErrorMessage));
 
                 var errors = new List<string>();
                 var saveds = new List<PL_Detail_Collection>();
@@ -71,6 +76,23 @@ namespace Evolution_Backend.Controllers
                         if (srGetCustomer.Data == null)
                         {
                             errors.Add(string.Format("PL '{0}' - PO '{1}': {2}", pl.PLNumber, pl.PONumber, ApiError.NotFound.GetDecription(string.Format("Customer '{0}'", pl.CustomerCode))));
+                            continue;
+                        }
+                    }
+
+                    int? status = null;
+                    if (!string.IsNullOrEmpty(pl.StatusCode))
+                    {
+                        status = pl.StatusCode.GetValue<StatusEnums.PL_PO>();
+                        if (!status.HasValue)
+                        {
+                            errors.Add(string.Format("PL '{0}' - PO '{1}': {2}", pl.PLNumber, pl.PONumber, ApiError.NotFound.GetDecription(string.Format("Status '{0}'", pl.StatusCode))));
+                            continue;
+                        }
+
+                        if (!new int[] { (int)StatusEnums.PL_PO.Open, (int)StatusEnums.PL_PO.Ready }.Contains(status.Value))
+                        {
+                            errors.Add(string.Format("PL '{0}' - PO '{1}': Status is {2}. Only allow upload packing PO with status 'open' or 'ready'", pl.PLNumber, pl.PONumber, pl.StatusCode));
                             continue;
                         }
                     }
@@ -305,6 +327,10 @@ namespace Evolution_Backend.Controllers
                                 qty_status = (int)StatusEnums.PL_Qty.Diff,
                                 note = ""
                             });
+
+                            //var boxNum = getBoxNumber(item.BoxNumber, srGetNumGenBox.Data.gen_length);
+                            //if (boxNum > srGetNumGenBox.Data.gen_number)
+                            //    srGetNumGenBox.Data.gen_number = boxNum;
                         }
 
                         if (errors.Any())
@@ -319,7 +345,7 @@ namespace Evolution_Backend.Controllers
                         pl_number = pl.PLNumber,
                         po_number = pl.PONumber,
                         customer_code = pl.CustomerCode,
-                        status = (int)StatusEnums.PL_PO.Open,
+                        status = status.HasValue ? status.Value : (int)StatusEnums.PL_PO.Open,
                         process_manual = pl.ProcessManual,
                         use_produce_qty = pl.UseProduceQty,
                         created_by = identity.UserId,
@@ -366,11 +392,21 @@ namespace Evolution_Backend.Controllers
                             action_content = string.Format("Added PO '{0}' to PL '{1}'", pl.PONumber, pl.PLNumber),
                             created_by = identity.UserId
                         });
-
-                        var msgUpdateStatus = await updatePLStatus(pl.PLNumber, identity.UserId);
-                        if (!string.IsNullOrEmpty(msgUpdateStatus))
-                            return new ApiResponse((int)ApiError.DbError, msgUpdateStatus);
                     }
+
+                    var msgUpdateStatus = await updatePLStatus(pl.PLNumber, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgUpdateStatus))
+                        return new ApiResponse((int)ApiError.DbError, msgUpdateStatus);
+
+                    if (PL_Detail.status == (int)StatusEnums.PL_PO.Ready && srGetPO.Data.status == (int)StatusEnums.PO.Open)
+                    {
+                        var msgUpdatePOStatus = await _POService.UpdateStatus(pl.PONumber, (int)StatusEnums.PO.Ready, identity.UserId);
+                        if (!string.IsNullOrEmpty(msgUpdatePOStatus))
+                            return new ApiResponse((int)ApiError.DbError, string.Format("Update PO '{0}' status to ready error: {1}", pl.PONumber, msgUpdatePOStatus));
+                    }
+
+                    //srGetNumGenBox.Data.updated_by = identity.UserId;
+                    //await _numGenService.Update(Constants.NumGenType.Box, srGetNumGenBox.Data);
                 }
 
                 var response = new ApiResponse(saveds);
@@ -384,7 +420,7 @@ namespace Evolution_Backend.Controllers
             });
         }
 
-        //[ApiExplorerSettings(IgnoreApi = true)]
+        [ApiExplorerSettings(IgnoreApi = true)]
         [HttpPost]
         [Route("create")]
         public async Task<ActionResult> Create([FromBody] PL_Request request)
@@ -408,6 +444,17 @@ namespace Evolution_Backend.Controllers
 
                     if (srGetCustomer.Data == null)
                         return new ApiResponse((int)ApiError.NotFound, ApiError.NotFound.GetDecription(string.Format("Customer '{0}'", request.CustomerCode)));
+                }
+
+                int? status = null;
+                if (!string.IsNullOrEmpty(request.StatusCode))
+                {
+                    status = request.StatusCode.GetValue<StatusEnums.PL_PO>();
+                    if (!status.HasValue)
+                        return new ApiResponse((int)ApiError.NotFound, ApiError.NotFound.GetDecription(string.Format("Status '{0}'", request.StatusCode)));
+
+                    if (!new int[] { (int)StatusEnums.PL_PO.Open, (int)StatusEnums.PL_PO.Ready }.Contains(status.Value))
+                        return new ApiResponse((int)ApiError.SystemError, string.Format("Status is '{0}'. Only allow create packing PO with status 'open' or 'ready'", request.StatusCode));
                 }
 
                 if (!request.Details.Any())
@@ -528,6 +575,10 @@ namespace Evolution_Backend.Controllers
 
                 #endregion
 
+                //var srGetNumGenBox = await _numGenService.Get(Constants.NumGenType.Box);
+                //if (!string.IsNullOrEmpty(srGetNumGenBox.ErrorMessage))
+                //    return new ApiResponse((int)ApiError.DbError, string.Format("Get box number generator error: {0}", srGetNumGenBox.ErrorMessage));
+
                 var PL_Items = new List<PL_Item_Collection>();
                 var PL_Item_Details = new List<PL_Item_Detail_Collection>();
                 foreach (var GBItem in request.Details.GroupBy(i => new { i.ItemNumber, i.ColorNumber, i.Inseam, i.Size }))
@@ -567,6 +618,10 @@ namespace Evolution_Backend.Controllers
                             qty_status = (int)StatusEnums.PL_Qty.Diff,
                             note = ""
                         });
+
+                        //var boxNum = getBoxNumber(item.BoxNumber, srGetNumGenBox.Data.gen_length);
+                        //if (boxNum > srGetNumGenBox.Data.gen_number)
+                        //    srGetNumGenBox.Data.gen_number = boxNum;
                     }
                 }
 
@@ -575,7 +630,7 @@ namespace Evolution_Backend.Controllers
                     pl_number = request.PLNumber,
                     po_number = request.PONumber,
                     customer_code = request.CustomerCode,
-                    status = (int)StatusEnums.PL_PO.Open,
+                    status = status.HasValue ? status.Value : (int)StatusEnums.PL_PO.Open,
                     process_manual = request.ProcessManual,
                     use_produce_qty = request.UseProduceQty,
                     created_by = identity.UserId,
@@ -618,11 +673,21 @@ namespace Evolution_Backend.Controllers
                         action_content = string.Format("Added PO '{0}' to PL '{1}'", request.PONumber, request.PLNumber),
                         created_by = identity.UserId
                     });
-
-                    var msgUpdateStatus = await updatePLStatus(request.PLNumber, identity.UserId);
-                    if (!string.IsNullOrEmpty(msgUpdateStatus))
-                        return new ApiResponse((int)ApiError.DbError, msgUpdateStatus);
                 }
+
+                var msgUpdateStatus = await updatePLStatus(request.PLNumber, identity.UserId);
+                if (!string.IsNullOrEmpty(msgUpdateStatus))
+                    return new ApiResponse((int)ApiError.DbError, msgUpdateStatus);
+
+                if (PL_Detail.status == (int)StatusEnums.PL_PO.Ready && srGetPO.Data.status == (int)StatusEnums.PO.Open)
+                {
+                    var msgUpdatePOStatus = await _POService.UpdateStatus(request.PONumber, (int)StatusEnums.PO.Ready, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgUpdatePOStatus))
+                        return new ApiResponse((int)ApiError.DbError, string.Format("Update PO '{0}' status to ready error: {1}", request.PONumber, msgUpdatePOStatus));
+                }
+
+                //srGetNumGenBox.Data.updated_by = identity.UserId;
+                //await _numGenService.Update(Constants.NumGenType.Box, srGetNumGenBox.Data);
 
                 return new ApiResponse(PL_Detail);
             });
@@ -894,7 +959,6 @@ namespace Evolution_Backend.Controllers
             });
         }
 
-        //[ApiExplorerSettings(IgnoreApi = true)]
         [HttpPost]
         [Route("count")]
         public async Task<ActionResult> Count([FromBody] CountRequest request)
@@ -921,7 +985,6 @@ namespace Evolution_Backend.Controllers
             });
         }
 
-        //[ApiExplorerSettings(IgnoreApi = true)]
         [HttpPost]
         [Route("read")]
         public async Task<ActionResult> Read([FromBody] ReadRequest request)
@@ -1038,7 +1101,6 @@ namespace Evolution_Backend.Controllers
             });
         }
 
-        //[ApiExplorerSettings(IgnoreApi = true)]
         [HttpGet]
         [Route("getdetails")]
         public async Task<ActionResult> GetDetails(string PLNumber, string PONumber)
@@ -1106,6 +1168,45 @@ namespace Evolution_Backend.Controllers
                     return new ApiResponse((int)ApiError.DbError, string.Format("Get PL items error: {0}", srRead.ErrorMessage));
 
                 return new ApiResponse(srRead.Datas);
+            });
+        }
+
+        [HttpGet]
+        [Route("getmaxboxnumber")]
+        public async Task<ActionResult> GetMaxBoxNumber()
+        {
+            return await ExecuteAsync(async () =>
+            {
+                var stages = new BsonDocument[] {
+                    new BsonDocument("$unwind", "$item_details"),
+                    new BsonDocument("$project", new BsonDocument {
+                        { "_id", 0 },
+                        { "boxNumber",
+                            new BsonDocument("$convert", new BsonDocument {
+                                { "input", "$item_details.box_number" },
+                                { "to", "int" },
+                                { "onError", 0 },
+                                { "onNull", 0 }
+                            })
+                        }
+                    }),
+                    new BsonDocument("$sort", new BsonDocument("boxNumber", -1)),
+                    new BsonDocument("$limit", 1)
+                };
+
+                var srRead = await _PLService.ReadDetail<object>(stages);
+                if (!string.IsNullOrEmpty(srRead.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get max box number error: {0}", srRead.ErrorMessage));
+
+                var maxBoxNumber = 0;
+                if(srRead.Datas != null && srRead.Datas.Any())
+                {
+                    var data = srRead.Datas[0].MapTo<Dictionary<string, int>>();
+                    if (data.ContainsKey("boxNumber"))
+                        maxBoxNumber = data["boxNumber"];
+                }
+
+                return new ApiResponse(maxBoxNumber);
             });
         }
 
@@ -1247,7 +1348,7 @@ namespace Evolution_Backend.Controllers
                         }
                         else
                         {
-                            if(existedItem.box_status ==(int)StatusEnums.PL_Box.Done)
+                            if (existedItem.box_status == (int)StatusEnums.PL_Box.Done)
                                 return new ApiResponse((int)ApiError.SystemError, string.Format("Box '{0}' status is done, can not upload this box", item.BoxNumber));
 
                             existedItem.box_status = boxStatus.Value;
@@ -1784,6 +1885,19 @@ namespace Evolution_Backend.Controllers
 
         #region Private methods
 
+        int getBoxNumber(string boxNumber, int length)
+        {
+            try
+            {
+                boxNumber = boxNumber.Remove(0, boxNumber.Length - length);
+                return int.Parse(boxNumber);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         string checkQuantity(IEnumerable<PO_Detail_Collection> PODetails, IEnumerable<PL_Detail_Collection> PLDetails, PL_Request newPLDetail)
         {
             var message = "";
@@ -1856,11 +1970,12 @@ namespace Evolution_Backend.Controllers
             var newPOStatus = (int)StatusEnums.PO.Packed;
             foreach (var PODetail in srGetPODetail.Data)
             {
+                var POQty = packedDetails.FirstOrDefault().use_produce_qty ? PODetail.additional_qty : PODetail.original_qty;
                 var packedQty = packedDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode).Sum(i => i.packed_qty));
-                if (packedQty > PODetail.additional_qty)
-                    return string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packed qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, packedQty, PODetail.additional_qty);
+                if (packedQty > POQty)
+                    return string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packed qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, packedQty, POQty);
 
-                if (packedQty < PODetail.additional_qty)
+                if (packedQty < POQty)
                 {
                     newPOStatus = (int)StatusEnums.PO.PartialPacked;
                     break;
