@@ -30,6 +30,8 @@ namespace Evolution_Backend.Services
 
         Task<string> UpdateDetail(string PONumber, string barcode, PO_Detail_Collection PO_Detail, string updatedBy);
 
+        Task<ServiceReadResponse<T>> ReadDetail<T>(IEnumerable<BsonDocument> stages = null, int pageSkip = 0, int pageLimit = int.MaxValue);
+
         Task<ServiceResponse<PO_Detail_Collection>> GetDetail(string PONumber, string barcode);
     }
 }

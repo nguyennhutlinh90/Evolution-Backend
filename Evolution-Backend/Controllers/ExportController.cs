@@ -32,49 +32,58 @@ namespace Evolution_Backend.Controllers
 
                 var stages = new BsonDocument[] {
                     new BsonDocument("$match", new BsonDocument("pl_number", PLNumber)),
-                    new BsonDocument("$project",
-                        new BsonDocument {
-                            { "_id", 0 },
-                            { "po_number", "$po_number" },
-                            { "item_number", new BsonDocument("$arrayElemAt", new BsonArray { "$items.item_number", 0 }) },
-                            { "item_details", "$item_details" }
-                        }
-                    ),
-                    new BsonDocument("$lookup",
-                        new BsonDocument {
-                            { "from", "item" },
-                            { "localField", "item_number" },
-                            { "foreignField", "item_number" },
-                            { "as", "item" }
-                        }
-                    ),
-                    new BsonDocument("$lookup",
-                        new BsonDocument {
-                            { "from", "po" },
-                            { "localField", "po_number" },
-                            { "foreignField", "po_number" },
-                            { "as", "po_master" }
-                        }
-                    ),
-                    new BsonDocument("$lookup",
-                        new BsonDocument {
-                            { "from", "po_detail" },
-                            { "localField", "po_number" },
-                            { "foreignField", "po_number" },
-                            { "as", "po_details" }
-                        }
-                    ),
-                    new BsonDocument("$project",
-                        new BsonDocument {
-                            { "_id", 0 },
-                            { "po_number", "$po_number" },
-                            { "packing", new BsonDocument("$arrayElemAt", new BsonArray { "$po_master.packing", 0 }) },
-                            { "ship", new BsonDocument("$arrayElemAt", new BsonArray { "$po_master.ship", 0 }) },
-                            { "season", new BsonDocument("$arrayElemAt", new BsonArray { "$item.season", 0 }) },
-                            { "item_sizes", "$po_details.size" },
-                            { "item_details", "$item_details" }
-                        }
-                    )
+                    new BsonDocument("$project", new BsonDocument {
+                        { "_id", 0 },
+                        { "po_number", "$po_number" },
+                        { "use_produce_qty", "$use_produce_qty" },
+                        { "item_number", new BsonDocument("$arrayElemAt", new BsonArray { "$items.item_number", 0 }) },
+                        { "item_details", "$item_details" }
+                    }),
+                    new BsonDocument("$lookup", new BsonDocument {
+                        { "from", "item" },
+                        { "localField", "item_number" },
+                        { "foreignField", "item_number" },
+                        { "as", "item" }
+                    }),
+                    new BsonDocument("$lookup", new BsonDocument {
+                        { "from", "po" },
+                        { "localField", "po_number" },
+                        { "foreignField", "po_number" },
+                        { "as", "po_master" }
+                    }),
+                    new BsonDocument("$lookup", new BsonDocument {
+                        { "from", "po_detail" },
+                        { "let", new BsonDocument("po_number", "$po_number") },
+                        { "pipeline",
+                            new BsonArray {
+                                new BsonDocument("$match",
+                                    new BsonDocument("$expr",
+                                        new BsonDocument("$eq", new BsonArray {
+                                            "$po_number",
+                                            "$$po_number"
+                                        })
+                                    )
+                                ),
+                                new BsonDocument("$sort", new BsonDocument {
+                                    { "item_number", 1 },
+                                    { "color_number", 1 },
+                                    { "inseam", 1 },
+                                    { "size", 1 }
+                                })
+                            }
+                        },
+                        { "as", "po_details" }
+                    }),
+                    new BsonDocument("$project", new BsonDocument {
+                        { "_id", 0 },
+                        { "po_number", "$po_number" },
+                        { "use_produce_qty", "$use_produce_qty" },
+                        { "packing", new BsonDocument("$arrayElemAt", new BsonArray { "$po_master.packing", 0 }) },
+                        { "ship", new BsonDocument("$arrayElemAt", new BsonArray { "$po_master.ship", 0 }) },
+                        { "season", new BsonDocument("$arrayElemAt", new BsonArray { "$item.season", 0 }) },
+                        { "po_details", "$po_details" },
+                        { "item_details", "$item_details" }
+                    })
                 };
 
                 var srRead = await _PLService.ReadDetail<object>(stages);

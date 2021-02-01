@@ -370,7 +370,32 @@ namespace Evolution_Backend.Controllers
                 if (request.Sorts == null || !request.Sorts.Any())
                     request.Sorts.Add(new SortRequest { Name = "created_on", Type = "desc" });
 
-                var stages = new BsonDocument[] { request.Filters.CreateFilter(), request.Sorts.CreateSort() };
+                var stages = new BsonDocument[] { 
+                    request.Filters.CreateFilter(),
+                    //new BsonDocument("$lookup", new BsonDocument {
+                    //    { "from", "pl_detail" },
+                    //    { "let", new BsonDocument("po_number", "$po_number") },
+                    //    { "pipeline",
+                    //        new BsonArray {
+                    //            new BsonDocument("$unwind", "$item_details"),
+                    //            new BsonDocument("$match",
+                    //                new BsonDocument("$expr",
+                    //                    new BsonDocument("$eq", new BsonArray { "$po_number", "$$po_number" })
+                    //                )
+                    //            ),
+                    //            new BsonDocument("$project", new BsonDocument {
+                    //                { "_id", 0 },
+                    //                { "use_produce_qty", "$use_produce_qty" },
+                    //                { "box_status", "$item_details.box_status" },
+                    //                { "expected_qty", "$item_details.expected_qty" },
+                    //                { "packed_qty", "$item_details.packed_qty" }
+                    //            })
+                    //        } 
+                    //    },
+                    //    { "as", "packed_infos" }
+                    //}),
+                    request.Sorts.CreateSort()
+                };
                 var srRead = await _POService.Read<object>(stages, request.PageSkip, request.PageLimit);
                 if (!string.IsNullOrEmpty(srRead.ErrorMessage))
                     return new ApiReadResponse((int)ApiError.DbError, string.Format("Get PO(s) error: {0}", srRead.ErrorMessage));
@@ -380,26 +405,94 @@ namespace Evolution_Backend.Controllers
         }
 
         [HttpGet]
-        [Route("getdetails")]
-        public async Task<ActionResult> GetDetails(string PONumber)
+        [Route("getdetail")]
+        public async Task<ActionResult> GetDetail(string PONumber)
         {
             return await ExecuteAsync(async () =>
             {
                 if (string.IsNullOrEmpty(PONumber))
                     return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PO number"));
 
-                var srGet = await _POService.Get(PONumber);
-                if (!string.IsNullOrEmpty(srGet.ErrorMessage))
-                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PO '{0}' error: {1}", PONumber, srGet.ErrorMessage));
+                var stages = new BsonDocument[] {
+                    new BsonDocument("$match", new BsonDocument("po_number", PONumber)),
+                    new BsonDocument("$lookup", new BsonDocument {
+                        { "from", "po_detail" },
+                        { "localField", "po_number" },
+                        { "foreignField", "po_number" },
+                        { "as", "item_details" }
+                    })
+                };
 
-                if (srGet.Data == null)
-                    return new ApiResponse((int)ApiError.NotFound, ApiError.NotFound.GetDecription(string.Format("PO '{0}'", PONumber)));
+                var srRead = await _POService.Read<object>(stages);
+                if (!string.IsNullOrEmpty(srRead.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PO(s) error: {0}", srRead.ErrorMessage));
 
-                var srGetDetail = await _POService.GetDetails(PONumber);
-                if (!string.IsNullOrEmpty(srGetDetail.ErrorMessage))
-                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PO '{0}' details error: {1}", PONumber, srGetDetail.ErrorMessage));
+                var data = srRead.Datas != null && srRead.Datas.Any() ? srRead.Datas.First() : new { };
 
-                return new ApiResponse(srGetDetail.Data);
+                return new ApiResponse(data);
+            });
+        }
+
+        [HttpGet]
+        [Route("getitems")]
+        public async Task<ActionResult> GetItems(string PONumber)
+        {
+            return await ExecuteAsync(async () =>
+            {
+                if (string.IsNullOrEmpty(PONumber))
+                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PO number"));
+
+                var stages = new BsonDocument[] {
+                    new BsonDocument("$match", new BsonDocument("po_number", PONumber)),
+                    new BsonDocument("$lookup", new BsonDocument {
+                        { "from", "pl_detail" },
+                        { "let",
+                            new BsonDocument {
+                                { "po_number", "$po_number" },
+                                { "barcode", "$barcode" }
+                            } 
+                        },
+                        { "pipeline",
+                            new BsonArray {
+                                new BsonDocument("$unwind", "$item_details"),
+                                new BsonDocument("$match",
+                                    new BsonDocument("$expr",
+                                        new BsonDocument("$and", new BsonArray {
+                                            new BsonDocument("$eq", new BsonArray {
+                                                "$po_number",
+                                                "$$po_number"
+                                            }),
+                                            new BsonDocument("$eq", new BsonArray {
+                                                "$item_details.barcode",
+                                                "$$barcode"
+                                            })
+                                        })
+                                    )
+                                ),
+                                new BsonDocument("$project", new BsonDocument {
+                                    { "_id", 0 },
+                                    { "use_produce_qty", "$use_produce_qty" },
+                                    { "box_status", "$item_details.box_status" },
+                                    { "expected_qty", "$item_details.expected_qty" },
+                                    { "packed_qty", "$item_details.packed_qty" }
+                                })
+                            } 
+                        },
+                        { "as", "packed_infos" }
+                    }),
+                    new BsonDocument("$sort", new BsonDocument {
+                        { "item_number", 1 },
+                        { "color_number", 1 },
+                        { "inseam", 1 },
+                        { "size", 1 }
+                    })
+                };
+
+                var srRead = await _POService.ReadDetail<object>(stages);
+                if (!string.IsNullOrEmpty(srRead.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PO '{0}' items error: {1}", PONumber, srRead.ErrorMessage));
+
+                return new ApiResponse(srRead.Datas);
             });
         }
 

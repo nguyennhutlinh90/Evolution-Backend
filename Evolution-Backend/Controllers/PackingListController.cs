@@ -97,6 +97,9 @@ namespace Evolution_Backend.Controllers
                         }
                     }
 
+                    if (!status.HasValue)
+                        status = (int)StatusEnums.PL_PO.Open;
+
                     if (pl.Details == null || !pl.Details.Any())
                     {
                         errors.Add(string.Format("PL '{0}' - PO '{1}': {2}", pl.PLNumber, pl.PONumber, ApiError.Requireds.GetDecription("Detail(s)")));
@@ -214,7 +217,7 @@ namespace Evolution_Backend.Controllers
                         continue;
                     }
 
-                    var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data.Where(d => d.status != (int)StatusEnums.PL_PO.Open), pl);
+                    var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data, pl);
                     if (!string.IsNullOrEmpty(msgCheckQty))
                     {
                         errors.Add(string.Format("PO '{0}': {1}", pl.PONumber, msgCheckQty));
@@ -345,7 +348,7 @@ namespace Evolution_Backend.Controllers
                         pl_number = pl.PLNumber,
                         po_number = pl.PONumber,
                         customer_code = pl.CustomerCode,
-                        status = status.HasValue ? status.Value : (int)StatusEnums.PL_PO.Open,
+                        status = status.Value,
                         process_manual = pl.ProcessManual,
                         use_produce_qty = pl.UseProduceQty,
                         created_by = identity.UserId,
@@ -457,6 +460,9 @@ namespace Evolution_Backend.Controllers
                         return new ApiResponse((int)ApiError.SystemError, string.Format("Status is '{0}'. Only allow create packing PO with status 'open' or 'ready'", request.StatusCode));
                 }
 
+                if (!status.HasValue)
+                    status = (int)StatusEnums.PL_PO.Open;
+
                 if (!request.Details.Any())
                     return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("Detail(s)"));
 
@@ -522,7 +528,7 @@ namespace Evolution_Backend.Controllers
                 if (!string.IsNullOrEmpty(srGetDetailsByPO.ErrorMessage))
                     return new ApiResponse((int)ApiError.DbError, string.Format("Get all PO '{0}' packing error: {1}", request.PONumber, srGetDetailsByPO.ErrorMessage));
 
-                var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data.Where(d => d.status != (int)StatusEnums.PL_PO.Open), request);
+                var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data, request);
                 if (!string.IsNullOrEmpty(msgCheckQty))
                     return new ApiResponse((int)ApiError.SystemError, msgCheckQty);
 
@@ -630,7 +636,7 @@ namespace Evolution_Backend.Controllers
                     pl_number = request.PLNumber,
                     po_number = request.PONumber,
                     customer_code = request.CustomerCode,
-                    status = status.HasValue ? status.Value : (int)StatusEnums.PL_PO.Open,
+                    status = status.Value,
                     process_manual = request.ProcessManual,
                     use_produce_qty = request.UseProduceQty,
                     created_by = identity.UserId,
@@ -784,7 +790,7 @@ namespace Evolution_Backend.Controllers
                     if (!string.IsNullOrEmpty(srGetDetailsByPO.ErrorMessage))
                         return new ApiResponse((int)ApiError.DbError, string.Format("Get PL '{0}' PO(s) error: {1}", PLNumber, srGetDetailsByPO.ErrorMessage));
 
-                    var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data.Where(d => d.pl_number != PLNumber && d.status != (int)StatusEnums.PL_PO.Open), srGetDetailsByPO.Data.FirstOrDefault(d => d.pl_number == PLNumber));
+                    var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data.Where(d => d.pl_number != PLNumber), srGetDetailsByPO.Data.FirstOrDefault(d => d.pl_number == PLNumber));
                     if (!string.IsNullOrEmpty(msgCheckQty))
                         return new ApiResponse((int)ApiError.SystemError, string.Format("PO '{0}': {1}", detail.po_number, msgCheckQty));
                 }
@@ -932,7 +938,7 @@ namespace Evolution_Backend.Controllers
                         if (!string.IsNullOrEmpty(srGetDetailsByPO.ErrorMessage))
                             return new ApiResponse((int)ApiError.DbError, string.Format("Get all PO '{0}' packing error: {1}", request.PONumber, srGetDetailsByPO.ErrorMessage));
 
-                        var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data.Where(d => d.pl_number != request.PLNumber && d.status != (int)StatusEnums.PL_PO.Open), srGetDetailsByPO.Data.FirstOrDefault(d => d.pl_number == request.PLNumber));
+                        var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data.Where(d => d.pl_number != request.PLNumber), srGetDetailsByPO.Data.FirstOrDefault(d => d.pl_number == request.PLNumber));
                         if (!string.IsNullOrEmpty(msgCheckQty))
                             return new ApiResponse((int)ApiError.SystemError, string.Format("PO '{0}': {1}", request.PONumber, msgCheckQty));
                     }
@@ -1102,72 +1108,31 @@ namespace Evolution_Backend.Controllers
         }
 
         [HttpGet]
-        [Route("getdetails")]
-        public async Task<ActionResult> GetDetails(string PLNumber, string PONumber)
+        [Route("getdetail")]
+        public async Task<ActionResult> GetDetail(string PLNumber)
         {
             return await ExecuteAsync(async () =>
             {
                 if (string.IsNullOrEmpty(PLNumber))
                     return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PL number"));
 
-                if (string.IsNullOrEmpty(PONumber))
-                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PO number"));
-
                 var stages = new BsonDocument[] {
-                    new BsonDocument("$match",
-                        new BsonDocument {
-                            { "pl_number", PLNumber },
-                            { "po_number", PONumber }
-                        }
-                    ),
-                    new BsonDocument("$unwind", "$item_details"),
-                    new BsonDocument("$group",
-                        new BsonDocument {
-                            { "_id",
-                                new BsonDocument
-                                {
-                                    { "box_number", "$item_details.box_number" },
-                                    { "box_dimension", "$item_details.box_dimension" },
-                                    { "box_weight", "$item_details.box_weight" },
-                                    { "box_status", "$item_details.box_status" }
-                                }
-                            },
-                            { "extras",
-                                new BsonDocument("$push", new BsonDocument
-                                {
-                                    { "color_number", "$item_details.color_number" },
-                                    { "color_description", "$item_details.color_description" },
-                                    { "inseam", "$item_details.inseam" },
-                                    { "size", "$item_details.size" },
-                                    { "barcode", "$item_details.barcode" },
-                                    { "item_weight", "$item_details.item_weight" },
-                                    { "expected_qty", "$item_details.expected_qty" },
-                                    { "packed_qty", "$item_details.packed_qty" }
-                                })
-                            }
-                        }
-                    ),
-                    new BsonDocument("$project",
-                        new BsonDocument
-                        {
-                            { "_id", 0 },
-                            { "box_number", "$_id.box_number" },
-                            { "box_dimension", "$_id.box_dimension" },
-                            { "box_weight", "$_id.box_weight" },
-                            { "box_status", "$_id.box_status" },
-                            { "total_expected_qty", new BsonDocument("$sum", "$extras.expected_qty") },
-                            { "total_packed_qty", new BsonDocument("$sum", "$extras.packed_qty") },
-                            { "extras", "$extras" }
-                        }
-                    ),
-                    new BsonDocument("$sort", new BsonDocument("box_number", 1))
+                    new BsonDocument("$match", new BsonDocument("pl_number", PLNumber)),
+                    new BsonDocument("$lookup", new BsonDocument {
+                        { "from", "pl_detail" },
+                        { "localField", "pl_number" },
+                        { "foreignField", "pl_number" },
+                        { "as", "po_details" }
+                    })
                 };
 
-                var srRead = await _PLService.ReadDetail<object>(stages);
+                var srRead = await _PLService.Read<object>(stages);
                 if (!string.IsNullOrEmpty(srRead.ErrorMessage))
-                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PL items error: {0}", srRead.ErrorMessage));
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PL(s) error: {0}", srRead.ErrorMessage));
 
-                return new ApiResponse(srRead.Datas);
+                var data = srRead.Datas != null && srRead.Datas.Any() ? srRead.Datas.First() : new { };
+
+                return new ApiResponse(data);
             });
         }
 
@@ -1199,7 +1164,7 @@ namespace Evolution_Backend.Controllers
                     return new ApiResponse((int)ApiError.DbError, string.Format("Get max box number error: {0}", srRead.ErrorMessage));
 
                 var maxBoxNumber = 0;
-                if(srRead.Datas != null && srRead.Datas.Any())
+                if (srRead.Datas != null && srRead.Datas.Any())
                 {
                     var data = srRead.Datas[0].MapTo<Dictionary<string, int>>();
                     if (data.ContainsKey("boxNumber"))
@@ -1903,11 +1868,13 @@ namespace Evolution_Backend.Controllers
             var message = "";
             foreach (var PODetail in PODetails)
             {
-                var PLQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode).Sum(i => i.expected_qty));
+                var POQty = newPLDetail.UseProduceQty ? PODetail.additional_qty : PODetail.original_qty;
+                var expectedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Open).Sum(i => i.expected_qty));
+                var packedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Done).Sum(i => i.packed_qty));
                 var newPLQty = newPLDetail.Details.Where(i => i.ItemNumber == PODetail.item_number && i.ColorNumber == PODetail.color_number && i.Inseam == PODetail.inseam && i.Size == PODetail.size).Sum(i => i.ExpectedQty);
-                if (PLQty + newPLQty > PODetail.additional_qty)
+                if (expectedQty + packedQty + newPLQty > POQty)
                 {
-                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, PLQty + newPLQty, PODetail.additional_qty);
+                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, expectedQty + packedQty + newPLQty, POQty);
                     break;
                 }
             }
@@ -1919,11 +1886,13 @@ namespace Evolution_Backend.Controllers
             var message = "";
             foreach (var PODetail in PODetails)
             {
-                var PLQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode).Sum(i => i.expected_qty));
+                var POQty = currentPLDetail.use_produce_qty ? PODetail.additional_qty : PODetail.original_qty;
+                var expectedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Open).Sum(i => i.expected_qty));
+                var packedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Done).Sum(i => i.packed_qty));
                 var currentPLQty = currentPLDetail.item_details.Where(i => i.barcode == PODetail.barcode).Sum(i => i.expected_qty);
-                if (PLQty + currentPLQty > PODetail.additional_qty)
+                if (expectedQty + packedQty + currentPLQty > POQty)
                 {
-                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, PLQty + currentPLQty, PODetail.additional_qty);
+                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, expectedQty + packedQty + currentPLQty, POQty);
                     break;
                 }
             }

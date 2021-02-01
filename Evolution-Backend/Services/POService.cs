@@ -138,6 +138,14 @@ namespace Evolution_Backend.Services
             });
         }
 
+        public async Task<ServiceReadResponse<T>> ReadDetail<T>(IEnumerable<BsonDocument> stages = null, int pageSkip = 0, int pageLimit = int.MaxValue)
+        {
+            return await ExecuteAsync(async () =>
+            {
+                return await _dbContext.po_detail.Read<PO_Detail_Collection, T>(stages, pageSkip, pageLimit);
+            });
+        }
+
         public async Task<ServiceResponse<PO_Detail_Collection>> GetDetail(string PONumber, string barcode)
         {
             return await ExecuteAsync(async () =>
