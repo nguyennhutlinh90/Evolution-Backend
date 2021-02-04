@@ -78,17 +78,11 @@ namespace Evolution_Backend.Services
         {
             return await ExecuteAsync(async () =>
             {
-                var updateSetStatus = Builders<PL_Collection>.Update.Set(pl => pl.status, (int)StatusEnums.PL.Ready);
-                var updateSetUpdatedBy = Builders<PL_Collection>.Update.Set(pl => pl.updated_by, updatedBy);
-                var updateSetUpdatedOn = Builders<PL_Collection>.Update.Set(pl => pl.updated_on, DateTime.Now);
-                var updateCombine = Builders<PL_Collection>.Update.Combine(updateSetStatus, updateSetUpdatedBy, updateSetUpdatedOn);
-                await _dbContext.pl.UpdateOneAsync(pl => pl.pl_number == PLNumber, updateCombine);
-
                 var updateDetailSetStatus = Builders<PL_Detail_Collection>.Update.Set(pld => pld.status, (int)StatusEnums.PL_PO.Ready);
                 var updateDetailSetUpdatedBy = Builders<PL_Detail_Collection>.Update.Set(pld => pld.updated_by, updatedBy);
                 var updateDetailSetUpdatedOn = Builders<PL_Detail_Collection>.Update.Set(pld => pld.updated_on, DateTime.Now);
                 var updateDetailCombine = Builders<PL_Detail_Collection>.Update.Combine(updateDetailSetStatus, updateDetailSetUpdatedBy, updateDetailSetUpdatedOn);
-                await _dbContext.pl_detail.UpdateManyAsync(pld => pld.pl_number == PLNumber, updateDetailCombine);
+                await _dbContext.pl_detail.UpdateManyAsync(pld => pld.pl_number == PLNumber && pld.status == (int)StatusEnums.PL_PO.Open, updateDetailCombine);
             });
         }
 

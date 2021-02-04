@@ -282,7 +282,6 @@ namespace Evolution_Backend.Controllers
 
                     #endregion
 
-                    var PL_Items = new List<PL_Item_Collection>();
                     var PL_Item_Details = new List<PL_Item_Detail_Collection>();
                     foreach (var GBItem in pl.Details.GroupBy(i => new { i.ItemNumber, i.ColorNumber, i.Inseam, i.Size }))
                     {
@@ -299,9 +298,6 @@ namespace Evolution_Backend.Controllers
                             errors.Add(string.Format("PL '{0}' - PO '{1}': Item '{2}' - Color '{3}' - Inseam '{4}' - Size '{5}': Expected qty ({6}) is out of PO '{7}' qty ({8})", pl.PLNumber, pl.PONumber, GBItem.Key.ItemNumber, GBItem.Key.ColorNumber, GBItem.Key.Inseam, GBItem.Key.Size, expectedQty, pl.PONumber, defineItem.po_qty));
                             break;
                         }
-
-                        if (!PL_Items.Any(i => i.item_number == defineItem.item_number))
-                            PL_Items.Add(new PL_Item_Collection { item_number = defineItem.item_number, item_description = defineItem.item_description });
 
                         foreach (var item in GBItem)
                         {
@@ -349,11 +345,10 @@ namespace Evolution_Backend.Controllers
                         po_number = pl.PONumber,
                         customer_code = pl.CustomerCode,
                         status = status.Value,
-                        process_manual = pl.ProcessManual,
                         use_produce_qty = pl.UseProduceQty,
                         created_by = identity.UserId,
                         updated_by = identity.UserId,
-                        items = PL_Items,
+                        items = srGetPO.Data.items.Select(i => new PL_Item_Collection { item_number = i.item_number, item_description = i.item_description }).ToList(),
                         item_details = PL_Item_Details
                     };
                     if (hasDefine)
@@ -423,7 +418,6 @@ namespace Evolution_Backend.Controllers
             });
         }
 
-        [ApiExplorerSettings(IgnoreApi = true)]
         [HttpPost]
         [Route("create")]
         public async Task<ActionResult> Create([FromBody] PL_Request request)
@@ -585,7 +579,6 @@ namespace Evolution_Backend.Controllers
                 //if (!string.IsNullOrEmpty(srGetNumGenBox.ErrorMessage))
                 //    return new ApiResponse((int)ApiError.DbError, string.Format("Get box number generator error: {0}", srGetNumGenBox.ErrorMessage));
 
-                var PL_Items = new List<PL_Item_Collection>();
                 var PL_Item_Details = new List<PL_Item_Detail_Collection>();
                 foreach (var GBItem in request.Details.GroupBy(i => new { i.ItemNumber, i.ColorNumber, i.Inseam, i.Size }))
                 {
@@ -596,9 +589,6 @@ namespace Evolution_Backend.Controllers
                     var expectedQty = GBItem.Sum(i => i.ExpectedQty);
                     if (expectedQty > defineItem.po_qty)
                         return new ApiResponse((int)ApiError.NotFound, string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}': Expected qty ({4}) is out of PO '{5}' qty ({6})", GBItem.Key.ItemNumber, GBItem.Key.ColorNumber, GBItem.Key.Inseam, GBItem.Key.Size, expectedQty, request.PONumber, defineItem.po_qty));
-
-                    if (!PL_Items.Any(i => i.item_number == defineItem.item_number))
-                        PL_Items.Add(new PL_Item_Collection { item_number = defineItem.item_number, item_description = defineItem.item_description });
 
                     foreach (var item in GBItem)
                     {
@@ -637,11 +627,10 @@ namespace Evolution_Backend.Controllers
                     po_number = request.PONumber,
                     customer_code = request.CustomerCode,
                     status = status.Value,
-                    process_manual = request.ProcessManual,
                     use_produce_qty = request.UseProduceQty,
                     created_by = identity.UserId,
                     updated_by = identity.UserId,
-                    items = PL_Items,
+                    items = srGetPO.Data.items.Select(i => new PL_Item_Collection { item_number = i.item_number, item_description = i.item_description }).ToList(),
                     item_details = PL_Item_Details
                 };
                 if (hasDefine)
@@ -696,6 +685,223 @@ namespace Evolution_Backend.Controllers
                 //await _numGenService.Update(Constants.NumGenType.Box, srGetNumGenBox.Data);
 
                 return new ApiResponse(PL_Detail);
+            });
+        }
+
+        [HttpPost]
+        [Route("update")]
+        public async Task<ActionResult> Update([FromBody] PL_Update_Request request)
+        {
+            return await ExecuteAsync(async (identity) =>
+            {
+                if (request == null)
+                    return new ApiResponse((int)ApiError.Missing, ApiError.Missing.GetDecription("request param"));
+
+                if (string.IsNullOrEmpty(request.PLNumber))
+                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PL number"));
+
+                if (string.IsNullOrEmpty(request.PONumber))
+                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PO number"));
+
+                if (!request.Details.Any())
+                    return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("Detail(s)"));
+
+                if (request.Details.Any(i => string.IsNullOrEmpty(i.BoxNumber)))
+                    return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("Box number(s)"));
+
+                if (request.Details.Any(i => string.IsNullOrEmpty(i.BoxDimension)))
+                    return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("Box dimension(s)"));
+
+                if (request.Details.Any(i => i.BoxWeight <= 0))
+                    return new ApiResponse((int)ApiError.Requireds, "Box weight(s) must be greater than 0");
+
+                if (request.Details.Any(i => string.IsNullOrEmpty(i.ItemNumber)))
+                    return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("Item number(s)"));
+
+                if (request.Details.Any(i => string.IsNullOrEmpty(i.ColorNumber)))
+                    return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("Color number(s)"));
+
+                if (request.Details.Any(i => string.IsNullOrEmpty(i.Inseam)))
+                    return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("Inseam(s)"));
+
+                if (request.Details.Any(i => string.IsNullOrEmpty(i.Size)))
+                    return new ApiResponse((int)ApiError.Requireds, ApiError.Requireds.GetDecription("Size(s)"));
+
+                //if (request.Details.Any(i => i.ItemWeight <= 0))
+                //    return new ApiResponse((int)ApiError.Requireds, "Item weight(s) must be greater than 0");
+
+                if (request.Details.Any(i => i.ExpectedQty <= 0))
+                    return new ApiResponse((int)ApiError.Requireds, "Expected qty(s) must be greater than 0");
+
+                var srGet = await _PLService.Get(request.PLNumber);
+                if (!string.IsNullOrEmpty(srGet.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PL '{0}' error: {1}", request.PLNumber, srGet.ErrorMessage));
+
+                if (srGet.Data == null)
+                    return new ApiResponse((int)ApiError.NotFound, ApiError.NotFound.GetDecription(string.Format("PL '{0}'", request.PLNumber)));
+
+                if (srGet.Data.status == (int)StatusEnums.PL.Done)
+                {
+                    var PLStatusCode = srGet.Data.status.GetName<StatusEnums.PL>();
+                    return new ApiResponse((int)ApiError.SystemError, string.Format("PL '{0}' status is '{1}', can not update PO", request.PLNumber, PLStatusCode));
+                }
+
+                var srGetDetail = await _PLService.GetDetail<PL_Detail_Collection>(request.PLNumber, request.PONumber);
+                if (!string.IsNullOrEmpty(srGetDetail.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PL '{0}' - PO '{1}' error: {2}", request.PLNumber, request.PONumber, srGetDetail.ErrorMessage));
+
+                if (srGetDetail.Data == null)
+                    return new ApiResponse((int)ApiError.NotFound, string.Format("PO '{0}' was not found on PL '{1}'", request.PONumber, request.PLNumber));
+
+                if (new int[] { (int)StatusEnums.PL_PO.Packed, (int)StatusEnums.PL_PO.Shipped }.Contains(srGetDetail.Data.status))
+                {
+                    var POStatusCode = srGetDetail.Data.status.GetName<StatusEnums.PL_PO>();
+                    return new ApiResponse((int)ApiError.SystemError, string.Format("PL '{0}' - PO '{1}' status is '{2}', can not update", request.PLNumber, request.PONumber, POStatusCode));
+                }
+
+                var srGetPODetail = await _POService.GetDetails(request.PONumber);
+                if (!string.IsNullOrEmpty(srGetPODetail.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PO '{0}' details error: {1}", request.PONumber, srGetPODetail.ErrorMessage));
+
+                var srGetDetailsByPO = await _PLService.GetDetailsByPO<PL_Detail_Collection>(request.PONumber);
+                if (!string.IsNullOrEmpty(srGetDetailsByPO.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get all PO '{0}' packing error: {1}", request.PONumber, srGetDetailsByPO.ErrorMessage));
+
+                var msgCheckQty = checkQuantity(srGetPODetail.Data, srGetDetailsByPO.Data.Where(d => d.pl_number != request.PLNumber), request, srGetDetail.Data.use_produce_qty);
+                if (!string.IsNullOrEmpty(msgCheckQty))
+                    return new ApiResponse((int)ApiError.SystemError, msgCheckQty);
+
+                #region Get definies
+
+                var PL_Item_Definies = new List<PL_Item_Define_Collection>();
+                var hasDefine = srGetDetail.Data.item_definies != null && srGetDetail.Data.item_definies.Any();
+                if (hasDefine)
+                {
+                    PL_Item_Definies = srGetDetail.Data.item_definies.Select(d => new PL_Item_Define_Collection
+                    {
+                        item_number = d.item_number,
+                        item_description = d.item_description,
+                        color_number = d.color_number,
+                        color_description = d.color_description,
+                        inseam = d.inseam,
+                        size = d.size,
+                        barcode = d.barcode,
+                        item_weight = d.item_weight,
+                        po_qty = d.po_qty
+                    }).ToList();
+                }
+                else
+                {
+                    foreach (var item in srGetPODetail.Data)
+                    {
+                        PL_Item_Definies.Add(new PL_Item_Define_Collection
+                        {
+                            item_number = item.item_number,
+                            item_description = item.item_description,
+                            color_number = item.color_number,
+                            color_description = item.color_description,
+                            inseam = item.inseam,
+                            size = item.size,
+                            barcode = item.barcode,
+                            po_qty = srGetDetail.Data.use_produce_qty ? item.additional_qty : item.original_qty
+                        });
+                    }
+                }
+
+                #endregion
+
+                var PL_Item_Details = new List<PL_Item_Detail_Collection>();
+                foreach (var GBItem in request.Details.GroupBy(i => new { i.ItemNumber, i.ColorNumber, i.Inseam, i.Size }))
+                {
+                    var defineItem = PL_Item_Definies.FirstOrDefault(d => d.item_number == GBItem.Key.ItemNumber && d.color_number == GBItem.Key.ColorNumber && d.inseam == GBItem.Key.Inseam && d.size == GBItem.Key.Size);
+                    if (defineItem == null)
+                        return new ApiResponse((int)ApiError.NotFound, string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' was not found in PO '{4}'", GBItem.Key.ItemNumber, GBItem.Key.ColorNumber, GBItem.Key.Inseam, GBItem.Key.Size, request.PONumber));
+
+                    var expectedQty = GBItem.Sum(i => i.ExpectedQty);
+                    if (expectedQty > defineItem.po_qty)
+                        return new ApiResponse((int)ApiError.NotFound, string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}': Expected qty ({4}) is out of PO '{5}' qty ({6})", GBItem.Key.ItemNumber, GBItem.Key.ColorNumber, GBItem.Key.Inseam, GBItem.Key.Size, expectedQty, request.PONumber, defineItem.po_qty));
+
+                    foreach (var item in GBItem)
+                    {
+                        if (GBItem.Count(i => i.BoxNumber == item.BoxNumber) > 1)
+                            return new ApiResponse((int)ApiError.Dupplicated, string.Format("Box '{0}' - Item '{1}' - Color '{2}' - Inseam '{3}' - Size '{4}' is dupplicated in list", item.BoxNumber, GBItem.Key.ItemNumber, GBItem.Key.ColorNumber, GBItem.Key.Inseam, GBItem.Key.Size));
+
+                        if (string.IsNullOrEmpty(item.BoxStatusCode))
+                            return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("Box status code"));
+
+                        var boxStatus = item.BoxStatusCode.GetValue<StatusEnums.PL_Box>();
+                        if (!boxStatus.HasValue)
+                            return new ApiResponse((int)ApiError.NotFound, ApiError.NotFound.GetDecription(string.Format("Box status '{0}'", item.BoxStatusCode)));
+
+                        PL_Item_Details.Add(new PL_Item_Detail_Collection
+                        {
+                            box_number = item.BoxNumber,
+                            box_dimension = item.BoxDimension,
+                            box_weight = item.BoxWeight,
+                            box_status = boxStatus.Value,
+                            item_number = item.ItemNumber,
+                            item_description = defineItem.item_description,
+                            color_number = item.ColorNumber,
+                            color_description = defineItem.color_description,
+                            inseam = item.Inseam,
+                            size = item.Size,
+                            barcode = defineItem.barcode,
+                            item_weight = item.ItemWeight,
+                            expected_qty = item.ExpectedQty,
+                            packed_qty = item.PackedQty,
+                            qty_status = item.ExpectedQty == item.PackedQty ? (int)StatusEnums.PL_Qty.Match : (int)StatusEnums.PL_Qty.Diff,
+                            note = item.Note
+                        });
+                    }
+                }
+                srGetDetail.Data.item_details = PL_Item_Details;
+
+                foreach (var GBItem in srGetDetail.Data.item_details.GroupBy(d => new { d.item_number, d.color_number, d.inseam, d.size }))
+                {
+                    var expectedQty = GBItem.Sum(i => i.expected_qty);
+                    var packedQty = GBItem.Sum(i => i.packed_qty);
+                    if (packedQty > expectedQty)
+                        return new ApiResponse((int)ApiError.NotFound, string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}': Packed qty ({4}) is out of expected qty ({5})", GBItem.Key.item_number, GBItem.Key.color_number, GBItem.Key.inseam, GBItem.Key.size, packedQty, expectedQty));
+                }
+
+                var currentStatus = srGetDetail.Data.status;
+
+                if (!srGetDetail.Data.item_details.Any(id => id.box_status != (int)StatusEnums.PL_Box.Open))
+                    srGetDetail.Data.status = currentStatus;
+                else if (!srGetDetail.Data.item_details.Any(id => id.box_status != (int)StatusEnums.PL_Box.Done))
+                {
+                    srGetDetail.Data.status = (int)StatusEnums.PL_PO.Packed;
+                    srGetDetail.Data.locked_by = "";
+                    srGetDetail.Data.locked_on = null;
+                }
+                else
+                    srGetDetail.Data.status = (int)StatusEnums.PL_PO.PartialPacked;
+
+                srGetDetail.Data.updated_by = identity.UserId;
+
+                var msgUpdateDetail = await _PLService.UpdateDetail(request.PLNumber, request.PONumber, srGetDetail.Data);
+                if (!string.IsNullOrEmpty(msgUpdateDetail))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Update PL '{0}' - PO '{1}' error: {2}", request.PLNumber, request.PONumber, msgUpdateDetail));
+
+                await _actionService.Create(new Action_Collection
+                {
+                    action_type = (int)TypeEnums.Action.PLUpdate,
+                    action_content = string.Format("Updated PL '{0}' - PO '{1}'", request.PLNumber, request.PONumber),
+                    created_by = identity.UserId
+                });
+
+                if (srGetDetail.Data.status != currentStatus)
+                {
+                    var msgUpdateStatus = await updatePLStatus(request.PLNumber, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgUpdateStatus))
+                        return new ApiResponse((int)ApiError.DbError, msgUpdateStatus);
+
+                    var msgUpdatePOStatus = await PDAUpload_UpdatePOStatus(request.PONumber, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgUpdatePOStatus))
+                        return new ApiResponse((int)ApiError.DbError, string.Format("Update PO '{0}' status error: {1}", request.PONumber, msgUpdatePOStatus));
+                }
+
+                return new ApiResponse(srGetDetail.Data);
             });
         }
 
@@ -755,6 +961,78 @@ namespace Evolution_Backend.Controllers
         }
 
         [HttpPost]
+        [Route("deletepo")]
+        public async Task<ActionResult> DeletePO(string PLNumber, string PONumber)
+        {
+            return await ExecuteAsync(async (identity) =>
+            {
+                if (string.IsNullOrEmpty(PLNumber))
+                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PL number"));
+
+                if (string.IsNullOrEmpty(PONumber))
+                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PO number"));
+
+                var srGetDetails = await _PLService.GetDetails<PL_Detail_Collection>(PLNumber, false);
+                if (!string.IsNullOrEmpty(srGetDetails.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PL '{0}' PO(s) error: {1}", PLNumber, srGetDetails.ErrorMessage));
+
+                var detail = srGetDetails.Data.FirstOrDefault(d => d.po_number == PONumber);
+                if (detail == null)
+                    return new ApiResponse((int)ApiError.NotFound, ApiError.NotFound.GetDecription(string.Format("PO '{0}' packing", PONumber)));
+
+                if (!new int[] { (int)StatusEnums.PL_PO.Open, (int)StatusEnums.PL_PO.Ready }.Contains(detail.status))
+                {
+                    var statusCode = detail.status.GetName<StatusEnums.PL_PO>();
+                    return new ApiResponse((int)ApiError.SystemError, string.Format("PO '{0}' packing status is '{1}', can not delete PO", PONumber, statusCode));
+                }
+
+                if (srGetDetails.Data.Count > 1)
+                {
+                    var msgDeletePO = await _PLService.RemoveDetail(PLNumber, PONumber, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgDeletePO))
+                        return new ApiResponse((int)ApiError.DbError, string.Format("Delete PO '{0}' packing error: {1}", PLNumber, msgDeletePO));
+
+                    await _actionService.Create(new Action_Collection
+                    {
+                        action_type = (int)TypeEnums.Action.PLDelete,
+                        action_content = string.Format("Deleted PO '{0}' on PL '{1}'", PONumber, PLNumber),
+                        created_by = identity.UserId
+                    });
+
+                    var msgUpdateStatus = await updatePLStatus(PLNumber, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgUpdateStatus))
+                        return new ApiResponse((int)ApiError.DbError, msgUpdateStatus);
+                }
+                else
+                {
+                    var msgDelete = await _PLService.Delete(PLNumber);
+                    if (!string.IsNullOrEmpty(msgDelete))
+                        return new ApiResponse((int)ApiError.DbError, string.Format("Delete PL '{0}' error: {1}", PLNumber, msgDelete));
+
+                    await _actionService.Create(new Action_Collection
+                    {
+                        action_type = (int)TypeEnums.Action.PLDelete,
+                        action_content = string.Format("Deleted PL '{0}'", PLNumber),
+                        created_by = identity.UserId
+                    });
+                }
+
+                var srGetDetailsByPO = await _PLService.GetDetailsByPO<PL_Detail_Collection>(PONumber, false);
+                if (!string.IsNullOrEmpty(srGetDetailsByPO.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get all PO '{0}' packing error: {1}", PONumber, srGetDetailsByPO.ErrorMessage));
+
+                if (!srGetDetailsByPO.Data.Any(d => d.status != (int)StatusEnums.PL_PO.Open))
+                {
+                    var msgUpdatePOStatus = await _POService.UpdateStatus(PONumber, (int)StatusEnums.PO.Open, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgUpdatePOStatus))
+                        return new ApiResponse((int)ApiError.DbError, string.Format("Update PO '{0}' status to open error: {1}", PONumber, msgUpdatePOStatus));
+                }
+
+                return new ApiResponse { is_success = true };
+            });
+        }
+
+        [HttpPost]
         [Route("setready")]
         public async Task<ActionResult> SetReady(string PLNumber)
         {
@@ -770,11 +1048,8 @@ namespace Evolution_Backend.Controllers
                 if (srGet.Data == null)
                     return new ApiResponse((int)ApiError.NotFound, ApiError.NotFound.GetDecription(string.Format("PL '{0}'", PLNumber)));
 
-                if (srGet.Data.status != (int)StatusEnums.PL.Draft)
-                {
-                    var statusCode = srGet.Data.status.GetName<StatusEnums.PL>();
-                    return new ApiResponse((int)ApiError.SystemError, string.Format("PL '{0}' status is '{1}', can not set ready for PL", PLNumber, statusCode));
-                }
+                if (srGet.Data.status == (int)StatusEnums.PL.Done)
+                    return new ApiResponse((int)ApiError.SystemError, string.Format("PL '{0}' status is 'done', can not set ready for PL", PLNumber));
 
                 var srGetDetails = await _PLService.GetDetails<PL_Detail_Collection>(PLNumber, false);
                 if (!string.IsNullOrEmpty(srGetDetails.ErrorMessage))
@@ -806,6 +1081,10 @@ namespace Evolution_Backend.Controllers
                     created_by = identity.UserId
                 });
 
+                var msgUpdateStatus = await updatePLStatus(PLNumber, identity.UserId);
+                if (!string.IsNullOrEmpty(msgUpdateStatus))
+                    return new ApiResponse((int)ApiError.DbError, msgUpdateStatus);
+
                 foreach (var detail in srGetDetails.Data)
                 {
                     var srGetPO = await _POService.Get(detail.po_number);
@@ -820,11 +1099,84 @@ namespace Evolution_Backend.Controllers
                     }
                 }
 
-                srGet.Data.status = (int)StatusEnums.PL.Ready;
-                srGet.Data.updated_by = identity.UserId;
-                srGet.Data.updated_on = DateTime.Now;
+                return new ApiResponse { is_success = true };
+            });
+        }
 
-                return new ApiResponse(srGet.Data);
+        [HttpPost]
+        [Route("undone")]
+        public async Task<ActionResult> UnDone([FromBody] PL_UnDone_Request request)
+        {
+            return await ExecuteAsync(async (identity) =>
+            {
+                if (request == null)
+                    return new ApiResponse((int)ApiError.Missing, ApiError.Missing.GetDecription("request param"));
+
+                if (string.IsNullOrEmpty(request.PLNumber))
+                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PL number"));
+
+                if (string.IsNullOrEmpty(request.PONumber))
+                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("PO number"));
+
+                if (string.IsNullOrEmpty(request.BoxNumber))
+                    return new ApiResponse((int)ApiError.Required, ApiError.Required.GetDecription("Box number"));
+
+                var srGetDetail = await _PLService.GetDetail<PL_Detail_Collection>(request.PLNumber, request.PONumber);
+                if (!string.IsNullOrEmpty(srGetDetail.ErrorMessage))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Get PL '{0}' - PO '{1} error: {2}", request.PLNumber, request.PONumber, srGetDetail.ErrorMessage));
+
+                if (srGetDetail.Data == null)
+                    return new ApiResponse((int)ApiError.NotFound, string.Format("PO '{0}' was not found on PL '{1}'", request.PONumber, request.PLNumber));
+
+                if (!srGetDetail.Data.item_details.Any(d => d.box_number == request.BoxNumber))
+                    return new ApiResponse((int)ApiError.NotFound, string.Format("Box '{0}' was not found on PO '{1}'", request.BoxNumber, request.PONumber));
+
+                foreach (var itemDetail in srGetDetail.Data.item_details)
+                {
+                    if (itemDetail.box_number == request.BoxNumber)
+                    {
+                        if (itemDetail.expected_qty == 0)
+                            srGetDetail.Data.item_details.Remove(itemDetail);
+                        else
+                        {
+                            itemDetail.box_status = (int)StatusEnums.PL_Box.UnDone;
+                            itemDetail.packed_qty = 0;
+                            itemDetail.qty_status = (int)StatusEnums.PL_Qty.Diff;
+                            itemDetail.note = "";
+                        }
+                    }
+                }
+
+                var currentStatus = srGetDetail.Data.status;
+
+                srGetDetail.Data.status = (int)StatusEnums.PL_PO.PartialPacked;
+                srGetDetail.Data.updated_by = identity.UserId;
+                srGetDetail.Data.locked_by = "";
+                srGetDetail.Data.locked_on = null;
+
+                var msgUpdateDetail = await _PLService.UpdateDetail(request.PLNumber, request.PONumber, srGetDetail.Data);
+                if (!string.IsNullOrEmpty(msgUpdateDetail))
+                    return new ApiResponse((int)ApiError.DbError, string.Format("Update PL '{0}' - PO '{1}' error: {2}", request.PLNumber, request.PONumber, msgUpdateDetail));
+
+                await _actionService.Create(new Action_Collection
+                {
+                    action_type = (int)TypeEnums.Action.PLUpdate,
+                    action_content = string.Format("PL '{0}' - PO '{1}': UnDone box '{2}'", request.PLNumber, request.PONumber, request.BoxNumber),
+                    created_by = identity.UserId
+                });
+
+                if (srGetDetail.Data.status != currentStatus)
+                {
+                    var msgUpdateStatus = await updatePLStatus(request.PLNumber, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgUpdateStatus))
+                        return new ApiResponse((int)ApiError.DbError, msgUpdateStatus);
+
+                    var msgUpdatePOStatus = await PDAUpload_UpdatePOStatus(request.PONumber, identity.UserId);
+                    if (!string.IsNullOrEmpty(msgUpdatePOStatus))
+                        return new ApiResponse((int)ApiError.DbError, string.Format("Update PO '{0}' status error: {1}", request.PONumber, msgUpdatePOStatus));
+                }
+
+                return new ApiResponse(lockedResponse(srGetDetail.Data));
             });
         }
 
@@ -1120,8 +1472,63 @@ namespace Evolution_Backend.Controllers
                     new BsonDocument("$match", new BsonDocument("pl_number", PLNumber)),
                     new BsonDocument("$lookup", new BsonDocument {
                         { "from", "pl_detail" },
-                        { "localField", "pl_number" },
-                        { "foreignField", "pl_number" },
+                        { "let", new BsonDocument("pl_number", "$pl_number") },
+                        { "pipeline",
+                            new BsonArray {
+                                new BsonDocument("$match",
+                                    new BsonDocument("$expr",
+                                        new BsonDocument("$eq", new BsonArray {
+                                            "$pl_number",
+                                            "$$pl_number"
+                                        })
+                                    )
+                                ),
+                                new BsonDocument("$lookup", new BsonDocument {
+                                    { "from", "pl_detail" },
+                                    { "let", new BsonDocument("po_number", "$po_number") },
+                                    { "pipeline",
+                                        new BsonArray {
+                                            new BsonDocument("$unwind", "$item_details"),
+                                            new BsonDocument("$match",
+                                                new BsonDocument("$expr",
+                                                    new BsonDocument("$eq", new BsonArray {
+                                                        "$po_number",
+                                                        "$$po_number"
+                                                    })
+                                                )
+                                            ),
+                                            new BsonDocument("$project", new BsonDocument {
+                                                { "_id", 0 },
+                                                { "box_status", "$item_details.box_status" },
+                                                { "barcode", "$item_details.barcode" },
+                                                { "expected_qty", "$item_details.expected_qty" },
+                                                { "packed_qty", "$item_details.packed_qty" }
+                                            })
+                                        }
+                                    },
+                                    { "as", "packed_infos" }
+                                }),
+                                new BsonDocument("$lookup", new BsonDocument {
+                                    { "from", "user" },
+                                    { "let", new BsonDocument("locked_id", "$locked_by") },
+                                    { "pipeline",
+                                        new BsonArray {
+                                            new BsonDocument("$addFields", new BsonDocument("user_id", new BsonDocument("$toString", "$_id"))),
+                                            new BsonDocument("$match",
+                                                new BsonDocument("$expr",
+                                                    new BsonDocument("$eq", new BsonArray { "$user_id", "$$locked_id" })
+                                                )
+                                            ),
+                                            new BsonDocument("$project", new BsonDocument {
+                                                { "_id", 0 },
+                                                { "user_name", "$user_name" }
+                                            })
+                                        }
+                                    },
+                                    { "as", "locked_users" }
+                                })
+                            }
+                        },
                         { "as", "po_details" }
                     })
                 };
@@ -1264,6 +1671,13 @@ namespace Evolution_Backend.Controllers
                     return new ApiResponse((int)ApiError.SystemError, string.Format("PL '{0}' - PO '{1}' status is '{2}', can not upload", request.PLNumber, request.PONumber, POStatusCode));
                 }
 
+                if (!string.IsNullOrEmpty(srGetDetail.Data.locked_by) && srGetDetail.Data.locked_by != identity.UserId)
+                {
+                    var response = new ApiResponse((int)ApiError.Locked, ApiError.Locked.GetDecription(string.Format("PL '{0}' - PO '{1}'", request.PLNumber, request.PONumber)) + " by another user");
+                    response.data = lockedResponse(srGetDetail.Data);
+                    return response;
+                }
+
                 foreach (var GBItem in request.Details.GroupBy(d => new { d.ItemNumber, d.ColorNumber, d.Inseam, d.Size }))
                 {
                     var existedItems = srGetDetail.Data.item_details.Where(i => i.item_number == GBItem.Key.ItemNumber && i.color_number == GBItem.Key.ColorNumber && i.inseam == GBItem.Key.Inseam && i.size == GBItem.Key.Size);
@@ -1337,7 +1751,11 @@ namespace Evolution_Backend.Controllers
                 if (!srGetDetail.Data.item_details.Any(id => id.box_status != (int)StatusEnums.PL_Box.Open))
                     srGetDetail.Data.status = (int)StatusEnums.PL_PO.Active;
                 else if (!srGetDetail.Data.item_details.Any(id => id.box_status != (int)StatusEnums.PL_Box.Done))
+                {
                     srGetDetail.Data.status = (int)StatusEnums.PL_PO.Packed;
+                    srGetDetail.Data.locked_by = "";
+                    srGetDetail.Data.locked_on = null;
+                }
                 else
                     srGetDetail.Data.status = (int)StatusEnums.PL_PO.PartialPacked;
 
@@ -1817,7 +2235,76 @@ namespace Evolution_Backend.Controllers
             });
         }
 
+        #endregion
+
         #region Private methods
+
+        int getBoxNumber(string boxNumber, int length)
+        {
+            try
+            {
+                boxNumber = boxNumber.Remove(0, boxNumber.Length - length);
+                return int.Parse(boxNumber);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        string checkQuantity(IEnumerable<PO_Detail_Collection> PODetails, IEnumerable<PL_Detail_Collection> PLDetails, PL_Request newPLDetail)
+        {
+            var message = "";
+            foreach (var PODetail in PODetails)
+            {
+                var POQty = newPLDetail.UseProduceQty ? PODetail.additional_qty : PODetail.original_qty;
+                var expectedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status != (int)StatusEnums.PL_Box.Done).Sum(i => i.expected_qty));
+                var packedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Done).Sum(i => i.packed_qty));
+                var newPLQty = newPLDetail.Details.Where(i => i.ItemNumber == PODetail.item_number && i.ColorNumber == PODetail.color_number && i.Inseam == PODetail.inseam && i.Size == PODetail.size).Sum(i => i.ExpectedQty);
+                if (expectedQty + packedQty + newPLQty > POQty)
+                {
+                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, expectedQty + packedQty + newPLQty, POQty);
+                    break;
+                }
+            }
+            return message;
+        }
+
+        string checkQuantity(IEnumerable<PO_Detail_Collection> PODetails, IEnumerable<PL_Detail_Collection> PLDetails, PL_Update_Request updatePLDetail, bool useProduceQty)
+        {
+            var message = "";
+            foreach (var PODetail in PODetails)
+            {
+                var POQty = useProduceQty ? PODetail.additional_qty : PODetail.original_qty;
+                var expectedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status != (int)StatusEnums.PL_Box.Done).Sum(i => i.expected_qty));
+                var packedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Done).Sum(i => i.packed_qty));
+                var updatePLQty = updatePLDetail.Details.Where(i => i.ItemNumber == PODetail.item_number && i.ColorNumber == PODetail.color_number && i.Inseam == PODetail.inseam && i.Size == PODetail.size).Sum(i => i.ExpectedQty);
+                if (expectedQty + packedQty + updatePLQty > POQty)
+                {
+                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, expectedQty + packedQty + updatePLQty, POQty);
+                    break;
+                }
+            }
+            return message;
+        }
+
+        string checkQuantity(IEnumerable<PO_Detail_Collection> PODetails, IEnumerable<PL_Detail_Collection> PLDetails, PL_Detail_Collection currentPLDetail)
+        {
+            var message = "";
+            foreach (var PODetail in PODetails)
+            {
+                var POQty = currentPLDetail.use_produce_qty ? PODetail.additional_qty : PODetail.original_qty;
+                var expectedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status != (int)StatusEnums.PL_Box.Done).Sum(i => i.expected_qty));
+                var packedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Done).Sum(i => i.packed_qty));
+                var currentPLQty = currentPLDetail.item_details.Where(i => i.barcode == PODetail.barcode).Sum(i => i.expected_qty);
+                if (expectedQty + packedQty + currentPLQty > POQty)
+                {
+                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, expectedQty + packedQty + currentPLQty, POQty);
+                    break;
+                }
+            }
+            return message;
+        }
 
         object lockedResponse(PL_Detail_Collection pl_detail)
         {
@@ -1842,61 +2329,6 @@ namespace Evolution_Backend.Controllers
                 locked_name,
                 pl_detail.locked_on
             };
-        }
-
-        #endregion
-
-        #endregion
-
-        #region Private methods
-
-        int getBoxNumber(string boxNumber, int length)
-        {
-            try
-            {
-                boxNumber = boxNumber.Remove(0, boxNumber.Length - length);
-                return int.Parse(boxNumber);
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        string checkQuantity(IEnumerable<PO_Detail_Collection> PODetails, IEnumerable<PL_Detail_Collection> PLDetails, PL_Request newPLDetail)
-        {
-            var message = "";
-            foreach (var PODetail in PODetails)
-            {
-                var POQty = newPLDetail.UseProduceQty ? PODetail.additional_qty : PODetail.original_qty;
-                var expectedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Open).Sum(i => i.expected_qty));
-                var packedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Done).Sum(i => i.packed_qty));
-                var newPLQty = newPLDetail.Details.Where(i => i.ItemNumber == PODetail.item_number && i.ColorNumber == PODetail.color_number && i.Inseam == PODetail.inseam && i.Size == PODetail.size).Sum(i => i.ExpectedQty);
-                if (expectedQty + packedQty + newPLQty > POQty)
-                {
-                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, expectedQty + packedQty + newPLQty, POQty);
-                    break;
-                }
-            }
-            return message;
-        }
-
-        string checkQuantity(IEnumerable<PO_Detail_Collection> PODetails, IEnumerable<PL_Detail_Collection> PLDetails, PL_Detail_Collection currentPLDetail)
-        {
-            var message = "";
-            foreach (var PODetail in PODetails)
-            {
-                var POQty = currentPLDetail.use_produce_qty ? PODetail.additional_qty : PODetail.original_qty;
-                var expectedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Open).Sum(i => i.expected_qty));
-                var packedQty = PLDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode && i.box_status == (int)StatusEnums.PL_Box.Done).Sum(i => i.packed_qty));
-                var currentPLQty = currentPLDetail.item_details.Where(i => i.barcode == PODetail.barcode).Sum(i => i.expected_qty);
-                if (expectedQty + packedQty + currentPLQty > POQty)
-                {
-                    message = string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packing qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, expectedQty + packedQty + currentPLQty, POQty);
-                    break;
-                }
-            }
-            return message;
         }
 
         async Task<string> updatePLStatus(string PLNumber, string userId)
@@ -1934,20 +2366,23 @@ namespace Evolution_Backend.Controllers
             if (!string.IsNullOrEmpty(srGetDetailsByPO.ErrorMessage))
                 return string.Format("Get all PO '{0}' packing error: {1}", PONumber, srGetDetailsByPO.ErrorMessage);
 
+            var newPOStatus = (int)StatusEnums.PO.Ready;
             var packedDetails = srGetDetailsByPO.Data.Where(d => new int[] { (int)StatusEnums.PL_PO.PartialPacked, (int)StatusEnums.PL_PO.Packed }.Contains(d.status));
-
-            var newPOStatus = (int)StatusEnums.PO.Packed;
-            foreach (var PODetail in srGetPODetail.Data)
+            if (packedDetails.Any())
             {
-                var POQty = packedDetails.FirstOrDefault().use_produce_qty ? PODetail.additional_qty : PODetail.original_qty;
-                var packedQty = packedDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode).Sum(i => i.packed_qty));
-                if (packedQty > POQty)
-                    return string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packed qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, packedQty, POQty);
-
-                if (packedQty < POQty)
+                newPOStatus = (int)StatusEnums.PO.Packed;
+                foreach (var PODetail in srGetPODetail.Data)
                 {
-                    newPOStatus = (int)StatusEnums.PO.PartialPacked;
-                    break;
+                    var POQty = packedDetails.FirstOrDefault().use_produce_qty ? PODetail.additional_qty : PODetail.original_qty;
+                    var packedQty = packedDetails.Sum(d => d.item_details.Where(i => i.barcode == PODetail.barcode).Sum(i => i.packed_qty));
+                    if (packedQty > POQty)
+                        return string.Format("Item '{0}' - Color '{1}' - Inseam '{2}' - Size '{3}' - Packed qty ({4}) is out of expected qty ({5})", PODetail.item_number, PODetail.color_number, PODetail.inseam, PODetail.size, packedQty, POQty);
+
+                    if (packedQty < POQty)
+                    {
+                        newPOStatus = (int)StatusEnums.PO.PartialPacked;
+                        break;
+                    }
                 }
             }
 

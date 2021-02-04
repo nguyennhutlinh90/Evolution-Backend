@@ -40,7 +40,8 @@
         public enum PL_Box
         {
             Open = 1,
-            Done = 2
+            Done = 2,
+            UnDone = 3
         }
 
         public enum PL_Qty

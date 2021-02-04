@@ -372,30 +372,45 @@ namespace Evolution_Backend.Controllers
 
                 var stages = new BsonDocument[] { 
                     request.Filters.CreateFilter(),
-                    //new BsonDocument("$lookup", new BsonDocument {
-                    //    { "from", "pl_detail" },
-                    //    { "let", new BsonDocument("po_number", "$po_number") },
-                    //    { "pipeline",
-                    //        new BsonArray {
-                    //            new BsonDocument("$unwind", "$item_details"),
-                    //            new BsonDocument("$match",
-                    //                new BsonDocument("$expr",
-                    //                    new BsonDocument("$eq", new BsonArray { "$po_number", "$$po_number" })
-                    //                )
-                    //            ),
-                    //            new BsonDocument("$project", new BsonDocument {
-                    //                { "_id", 0 },
-                    //                { "use_produce_qty", "$use_produce_qty" },
-                    //                { "box_status", "$item_details.box_status" },
-                    //                { "expected_qty", "$item_details.expected_qty" },
-                    //                { "packed_qty", "$item_details.packed_qty" }
-                    //            })
-                    //        } 
-                    //    },
-                    //    { "as", "packed_infos" }
-                    //}),
                     request.Sorts.CreateSort()
                 };
+                //var afterStages = new BsonDocument[] {
+                //    new BsonDocument("$lookup", new BsonDocument {
+                //        { "from", "pl_detail" },
+                //        { "let", new BsonDocument("po_number", "$po_number") },
+                //        { "pipeline",
+                //            new BsonArray {
+                //                new BsonDocument("$match",
+                //                    new BsonDocument("$expr",
+                //                        new BsonDocument("$eq", new BsonArray { "$po_number", "$$po_number" })
+                //                    )
+                //                ),
+                //                new BsonDocument("$project", new BsonDocument {
+                //                    { "_id", 0 },
+                //                    { "pl_number", 1 },
+                //                    { "use_produce_qty", 1 },
+                //                    { "total_packed_qty",
+                //                        new BsonDocument("$sum",
+                //                            new BsonDocument("$switch", new BsonDocument {
+                //                                { "branches",
+                //                                    new BsonArray {
+                //                                        new BsonDocument {
+                //                                            { "case", new BsonDocument("$eq", new BsonArray { "$item_details.box_status", 2 }) },
+                //                                            { "then", "$item_details.packed_qty" }
+                //                                        }
+                //                                    }
+                //                                },
+                //                                { "default", "$item_details.expected_qty" }
+                //                            })
+                //                        )
+                //                    }
+                //                })
+                //            }
+                //        },
+                //        { "as", "packed_infos" }
+                //    })
+                //};
+
                 var srRead = await _POService.Read<object>(stages, request.PageSkip, request.PageLimit);
                 if (!string.IsNullOrEmpty(srRead.ErrorMessage))
                     return new ApiReadResponse((int)ApiError.DbError, string.Format("Get PO(s) error: {0}", srRead.ErrorMessage));

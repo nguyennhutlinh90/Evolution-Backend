@@ -117,9 +117,6 @@ namespace Evolution_Backend.DbModels
         [BsonElement("customer_code")]
         public string customer_code { get; set; }
 
-        [BsonElement("process_manual")]
-        public bool process_manual { get; set; }
-
         [BsonElement("use_produce_qty")]
         public bool use_produce_qty { get; set; }
 
