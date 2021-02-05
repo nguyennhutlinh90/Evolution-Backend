@@ -174,7 +174,7 @@ namespace Evolution_Backend
             return countData;
         }
 
-        public static async Task<ReadResponse<TResult>> Read<TDocument, TResult>(this IMongoCollection<TDocument> collection, IEnumerable<BsonDocument> stages = null, int skip = 0, int limit = 0, IEnumerable<BsonDocument> afterStages = null)
+        public static async Task<ReadResponse<TResult>> Read<TDocument, TResult>(this IMongoCollection<TDocument> collection, IEnumerable<BsonDocument> stages = null, int skip = 0, int limit = 0, IEnumerable<BsonDocument> stageAfters = null)
         {
             var aggregate = collection.Aggregate()
                 .AppendStage<TResult>(new BsonDocument("$match", new BsonDocument()));
@@ -195,9 +195,9 @@ namespace Evolution_Backend
             if (limit > 0)
                 aggregate = aggregate.Limit(limit);
 
-            if (afterStages != null && afterStages.Any())
+            if (stageAfters != null && stageAfters.Any())
             {
-                foreach (var stage in afterStages.Where(st => st != null))
+                foreach (var stage in stageAfters.Where(st => st != null))
                 {
                     aggregate = aggregate.AppendStage<TResult>(stage);
                 }

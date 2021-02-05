@@ -138,11 +138,11 @@ namespace Evolution_Backend.Services
             });
         }
 
-        public async Task<ServiceReadResponse<T>> ReadDetail<T>(IEnumerable<BsonDocument> stages = null, int pageSkip = 0, int pageLimit = int.MaxValue)
+        public async Task<ServiceReadResponse<T>> ReadDetail<T>(IEnumerable<BsonDocument> stages = null, int pageSkip = 0, int pageLimit = int.MaxValue, IEnumerable<BsonDocument> stageAfters = null)
         {
             return await ExecuteAsync(async () =>
             {
-                return await _dbContext.po_detail.Read<PO_Detail_Collection, T>(stages, pageSkip, pageLimit);
+                return await _dbContext.po_detail.Read<PO_Detail_Collection, T>(stages, pageSkip, pageLimit, stageAfters);
             });
         }
 
